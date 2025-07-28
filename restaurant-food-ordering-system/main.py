@@ -7,6 +7,7 @@ from decimal import Decimal
 import re
 from itertools import count
 import uvicorn
+from datetime import datetime
 
 class FoodCategory(str, Enum):
     APPETIZER = "appetizer"
@@ -77,10 +78,52 @@ class FoodItem(FoodItemBase):
         return info
 
 
+class OrderStatus(str, Enum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    READY = "ready"
+    DELIVERED = "delivered"
+
+class OrderItem(BaseModel):
+    menu_item_id: int = Field(..., gt=0)
+    menu_item_name: str = Field(..., min_length=1, max_length=100)
+    quantity: int = Field(..., gt=0, le=10)
+    unit_price: Decimal = Field(..., gt=0, max_digits=6, decimal_places=2)
+
+    @property
+    def item_total(self) -> Decimal:
+        return self.unit_price * self.quantity
+
+class Customer(BaseModel):
+    name: str = Field(..., min_length=3, max_length=100, description="Name of the customer")
+    phone: str = Field(..., pattern=r'^\d{10}$')
+    
+
+class Order(BaseModel):
+    customer: Customer = Field(..., description="Customer details")
+    items: List[OrderItem] = Field(..., min_items=1, description="Items in the order")
+    total_price: Decimal = Field(..., gt=0, max_digits=6, decimal_places=2, description="Total price of the order")
+    status: OrderStatus = Field(..., description="Status of the order")
+    created_at: datetime = Field(..., default_factory=datetime.now, description="Date and time the order was created")
+    updated_at: datetime = Field(..., default_factory=datetime.now, description="Date and time the order was last updated")
+
+    @property
+    def total_price(self) -> Decimal:
+        return sum(item.item_total for item in self.items)
+    
+    @property
+    def order_total(self) -> Decimal:
+        return sum(item.item_total for item in self.items)
+
+    @property
+    def order_status(self) -> OrderStatus:
+        return self.status
+
 # ////////////////////////////////////////////
 
 app = FastAPI(title="Restaurant Food Ordering System", description="API for managing restaurant menu and orders", version="1.0.0")
 menu_db: dict[int, FoodItem] = {}
+orders_db: dict[int, Order] = {}
 id_generator = count(1)
 
 # api endpoints
@@ -122,6 +165,31 @@ def delete_item(item_id: int = Path(..., ge=1)):
 def get_by_category(category: FoodCategory):
     items = [item for item in menu_db.values() if item.category == category]
     return JSONResponse(content=items, status_code=200)
+
+@app.post("/orders", response_model=Order)
+def create_order(order: Order):
+    new_id = next(id_generator)
+    new_order = Order(id=new_id, **order.model_dump())
+    orders_db[new_id] = new_order
+    return JSONResponse(content=new_order.model_dump(), status_code=201)
+
+@app.get("/orders", response_model=List[Order])
+def get_orders():
+    return JSONResponse(content=list(orders_db.values()), status_code=200)
+
+@app.get("/orders/{order_id}", response_model=Order)
+def get_order(order_id: int = Path(..., ge=1)):
+    if order_id not in orders_db:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return JSONResponse(content=orders_db[order_id].model_dump(), status_code=200)
+
+@app.put("/orders/{order_id}", response_model=Order)
+def update_order(order_id: int = Path(..., ge=1), order: Order = None):
+    if order_id not in orders_db:
+        raise HTTPException(status_code=404, detail="Order not found")
+    updated_order = Order(id=order_id, **order.model_dump())
+    orders_db[order_id] = updated_order
+    return JSONResponse(content=updated_order.model_dump(), status_code=200)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
