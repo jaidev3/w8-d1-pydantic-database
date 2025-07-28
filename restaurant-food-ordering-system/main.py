@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Path
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator, model_validator, computed_field, Field
 from enum import Enum
 from typing import List, Optional
@@ -78,7 +79,7 @@ class FoodItem(FoodItemBase):
 
 # ////////////////////////////////////////////
 
-app = FastAPI()
+app = FastAPI(title="Restaurant Food Ordering System", description="API for managing restaurant menu and orders", version="1.0.0")
 menu_db: dict[int, FoodItem] = {}
 id_generator = count(1)
 
@@ -86,20 +87,21 @@ id_generator = count(1)
 
 @app.get("/menu", response_model=List[FoodItem])
 def get_menu():
-    return list(menu_db.values())
+    data = list(menu_db.values())
+    return JSONResponse(content=data, status_code=200)
 
 @app.get("/menu/{item_id}", response_model=FoodItem)
 def get_item(item_id: int = Path(..., ge=1)):
     if item_id not in menu_db:
         raise HTTPException(status_code=404, detail="Item not found")
-    return menu_db[item_id]
+    return JSONResponse(content=menu_db[item_id].model_dump(), status_code=200)
 
 @app.post("/menu", response_model=FoodItem)
 def add_item(item: FoodItemBase):
     new_id = next(id_generator)
     new_item = FoodItem(id=new_id, **item.model_dump())
     menu_db[new_id] = new_item
-    return new_item
+    return JSONResponse(content=new_item.model_dump(), status_code=201)
 
 @app.put("/menu/{item_id}", response_model=FoodItem)
 def update_item(item_id: int = Path(..., ge=1), item: FoodItemBase = None):
@@ -107,16 +109,19 @@ def update_item(item_id: int = Path(..., ge=1), item: FoodItemBase = None):
         raise HTTPException(status_code=404, detail="Item not found")
     updated_item = FoodItem(id=item_id, **item.model_dump())
     menu_db[item_id] = updated_item
-    return updated_item
+    return JSONResponse(content=updated_item.model_dump(), status_code=200)
 
 @app.delete("/menu/{item_id}")
 def delete_item(item_id: int = Path(..., ge=1)):
     if item_id not in menu_db:
         raise HTTPException(status_code=404, detail="Item not found")
     del menu_db[item_id]
-    return {"message": "Item deleted"}
+    return JSONResponse(content={"message": "Item deleted"}, status_code=200)
 
 @app.get("/menu/category/{category}", response_model=List[FoodItem])
 def get_by_category(category: FoodCategory):
     items = [item for item in menu_db.values() if item.category == category]
-    return items
+    return JSONResponse(content=items, status_code=200)
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
